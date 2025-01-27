@@ -9,6 +9,11 @@ public class HttpClientTestPost {
 
     private static String url = "http://localhost:8080/multi_threads_war_exploded/";
 
+    final static private int NUM_THREADS = 32;
+    final static private int NUM_START_REQUESTS = 1000;
+    final static private int TOTAL_REQUESTS = 200_000;
+
+
     private static final HttpClient httpClient = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_2)
             .connectTimeout(Duration.ofSeconds(10))
@@ -16,29 +21,39 @@ public class HttpClientTestPost {
 
     public static void main(String[] args) throws IOException, InterruptedException {
 
-        // JSON formatted data
-        String json = new StringBuilder()
-                .append("{")
-                .append("\"time\": 12345,")
-                .append("\"liftID\": 678")
-                .append("}")
-                .toString();
+        Thread[] threads = new Thread[NUM_THREADS];
 
-        // add json header
-        HttpRequest request = HttpRequest.newBuilder()
-                .POST(HttpRequest.BodyPublishers.ofString(json))
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .build();
+        for (int i = 0; i < TOTAL_REQUESTS; i++) {
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            Runnable thread = () -> {
+                try {
+                    // FIXME: generate random skier lift ride event json is right, but should separate from another single thread
+                    String json = SkierRide.GenerateRandomSkierRide().toString();
 
-        // print status code
-        System.out.println(response.statusCode());
+                    // add json header
+                    HttpRequest request = HttpRequest.newBuilder()
+                            .POST(HttpRequest.BodyPublishers.ofString(json))
+                            .uri(URI.create(url))
+                            .header("Content-Type", "application/json")
+                            .build();
 
-        // print response body
-        System.out.println(response.body());
+                    // send post request
+                    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+                    // print response
+                    System.out.println(response.statusCode());
+                    System.out.println(response.body());
+
+
+                } catch (IOException | InterruptedException e) {
+                    System.err.println("Error in thread " + Thread.currentThread().getId() + ": " + e.getMessage());
+                    e.printStackTrace();
+                }
+            };
+
+            threads[i] = new Thread(thread);
+            threads[i].start();
+        }
 
     }
-
 }
