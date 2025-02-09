@@ -83,7 +83,10 @@ public class HttpClientTestPost {
             int sent = 0;
             while (sent < requestNum) {
                 try {
+                    /* Not sure if there would be a race condition to use below:
                     String reqJson = requestQueue.take();
+                     */
+                    String reqJson = requestQueue.poll(2, TimeUnit.SECONDS);
                     // If requestQueue is not empty, would not block
                     if (postCheck(reqJson)) {
                         completedRequests.incrementAndGet();
