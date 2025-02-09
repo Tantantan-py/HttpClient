@@ -101,7 +101,7 @@ public class HttpClientTestPost {
                 HttpRequest req = HttpRequest.newBuilder()
                     .POST(HttpRequest.BodyPublishers.ofString(reqJson))
                     .uri(URI.create(SERVER_URL))
-                    .header("Conten-Type", "application/json")
+                    .header("Content-Type", "application/json")
                     .build();
 
                 HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
