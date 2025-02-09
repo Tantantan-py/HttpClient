@@ -7,10 +7,8 @@ import java.time.Duration;
 
 import com.google.gson.Gson;
 
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.*;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.servlet.http.HttpServletResponse;
 
@@ -45,6 +43,17 @@ public class HttpClientTestPost {
         // Create a new thread for the random skier ride generator
         Thread generatorThread = new Thread(new SkierRideGenerator());
         generatorThread.start();
+
+        // For debugging:
+        // Create a scheduler to run a task every minute
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        final AtomicInteger lastCount = new AtomicInteger(0);
+
+        scheduler.scheduleAtFixedRate(() -> {
+            int currentCount = completedRequests.get();
+            int requestsLastMinute = currentCount - lastCount.getAndSet(currentCount);
+            System.out.println("Requests handled in the last minute: " + requestsLastMinute);
+        }, 1, 1, TimeUnit.MINUTES);
 
         // Customize the thread pool for POST
         executor = new ThreadPoolExecutor(INITIAL_THREADS,
@@ -140,7 +149,10 @@ public class HttpClientTestPost {
 
                 HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
 
-                return res.statusCode() == HttpServletResponse.SC_CREATED;
+                // For debugging
+                // System.out.println("Status code: " + res.statusCode());
+
+                return res.statusCode() == HttpServletResponse.SC_CREATED || res.statusCode() == HttpServletResponse.SC_OK;
             } catch (Exception e) {
                 return false;
             }
@@ -171,7 +183,14 @@ public class HttpClientTestPost {
 
                     executor.setCorePoolSize(targetThreads);
                     executor.setMaximumPoolSize(targetThreads);
-                    System.out.println("Increased thread pool size to: " + targetThreads);
+
+                    int currentPoolSize = executor.getCorePoolSize();
+                    if (targetThreads != currentPoolSize) {
+                        executor.setCorePoolSize(targetThreads);
+                        executor.setMaximumPoolSize(targetThreads);
+                        System.out.println("Thread pool size changed to: " + targetThreads);
+                    }
+
                 }
                 // Scale down
                 else if (requestQueueSize < DECREASE_QUEUE_THRESHOLD && queueToThreadRatio < QUEUE_TO_THREAD_RATIO_THRESHOLD) {
@@ -187,8 +206,15 @@ public class HttpClientTestPost {
 
                     executor.setCorePoolSize(targetThreads);
                     executor.setMaximumPoolSize(targetThreads);
-                    System.out.println("Decreased thread pool size to: " + targetThreads);
+
+                    int currentPoolSize = executor.getCorePoolSize();
+                    if (targetThreads != currentPoolSize) {
+                        executor.setCorePoolSize(targetThreads);
+                        executor.setMaximumPoolSize(targetThreads);
+                        System.out.println("Thread pool size changed to: " + targetThreads);
+                    }
                 }
+
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
