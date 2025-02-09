@@ -14,7 +14,6 @@ import javax.servlet.http.HttpServletResponse;
 
 
 public class HttpClientTestPost {
-
     private static String SERVER_URL = "http://localhost:8080/multi_threads_war_exploded/";
 
     private static final int INITIAL_THREADS = 32;
@@ -22,6 +21,10 @@ public class HttpClientTestPost {
     private static final int TOTAL_REQUESTS = 200_000;
     private static final int MAXIMUM_THREAD_POOL_SIZE = 512;
     private static final int SCALE_CHECK_INTERVAL_MS = 5000;
+
+    private static final int INCREASE_QUEUE_THRESHOLD = 10_000;
+    private static final int DECREASE_QUEUE_THRESHOLD = 5_000;
+    private static final double QUEUE_TO_THREAD_RATIO_THRESHOLD = 100.0;
 
     private static LinkedBlockingQueue<String> requestQueue = new LinkedBlockingQueue<>();
     private static AtomicInteger completedRequests = new AtomicInteger(0);
@@ -118,18 +121,39 @@ public class HttpClientTestPost {
                 int activeThreads = executor.getActiveCount();
                 int requestQueueSize = requestQueue.size();
 
-                if (requestQueueSize > 10_000 && activeThreads < MAXIMUM_THREAD_POOL_SIZE / 2) {
-                    int targetThreads = Math.min(MAXIMUM_THREAD_POOL_SIZE,
-                        activeThreads + INITIAL_THREADS);
+                double queueToThreadRatio = (activeThreads == 0) ? 0 : (double) requestQueueSize / activeThreads;
+
+                // Scale up if the queue size exceeds threshold and based on thread-to-queue ratio
+                if (requestQueueSize > INCREASE_QUEUE_THRESHOLD || queueToThreadRatio > QUEUE_TO_THREAD_RATIO_THRESHOLD) {
+                    int targetThreads;
+
+                    if (activeThreads <= INITIAL_THREADS) {
+                        targetThreads = 128; // Scale from 32 → 128
+                    } else if (activeThreads <= 128) {
+                        targetThreads = 256; // Scale from 128 → 256
+                    } else {
+                        targetThreads = MAXIMUM_THREAD_POOL_SIZE; // Final scale from 256 → 512
+                    }
+
                     executor.setCorePoolSize(targetThreads);
                     executor.setMaximumPoolSize(targetThreads);
-                    System.out.println("Increase threads size to: " + targetThreads);
-                } else if (requestQueueSize < 5_000 && activeThreads > INITIAL_THREADS) {
-                    int targetThreads = Math.min(MAXIMUM_THREAD_POOL_SIZE,
-                        activeThreads - INITIAL_THREADS);
+                    System.out.println("Increased thread pool size to: " + targetThreads);
+                }
+                // Scale down
+                else if (requestQueueSize < DECREASE_QUEUE_THRESHOLD && queueToThreadRatio < QUEUE_TO_THREAD_RATIO_THRESHOLD) {
+                    int targetThreads;
+
+                    if (activeThreads >= 512) {
+                        targetThreads = 256;
+                    } else if (activeThreads >= 256) {
+                        targetThreads = 128;
+                    } else {
+                        targetThreads = INITIAL_THREADS;
+                    }
+
                     executor.setCorePoolSize(targetThreads);
                     executor.setMaximumPoolSize(targetThreads);
-                    System.out.println("Decrease threads size to: " + targetThreads);
+                    System.out.println("Decreased thread pool size to: " + targetThreads);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
