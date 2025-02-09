@@ -4,7 +4,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+
 import com.google.gson.Gson;
+
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
@@ -28,6 +30,7 @@ public class HttpClientTestPost {
 
     private static LinkedBlockingQueue<String> requestQueue = new LinkedBlockingQueue<>();
     private static AtomicInteger completedRequests = new AtomicInteger(0);
+    private static AtomicInteger unsuccessfulRequests = new AtomicInteger(0);
     private static ThreadPoolExecutor executor;
 
     private static final HttpClient httpClient = HttpClient.newBuilder()
@@ -36,18 +39,44 @@ public class HttpClientTestPost {
             .build();
 
     public static void main(String[] args) throws IOException, InterruptedException {
-        // Create a new thread for handling the random skier ride generator
-        new Thread(new SkierRideGenerator()).start();
+        // Start time
+        long startTime = System.currentTimeMillis();
+
+        // Create a new thread for the random skier ride generator
+        Thread generatorThread = new Thread(new SkierRideGenerator());
+        generatorThread.start();
 
         // Customize the thread pool for POST
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(INITIAL_THREADS,
-            MAXIMUM_THREAD_POOL_SIZE, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), new CallerRunsPolicy());
+        executor = new ThreadPoolExecutor(INITIAL_THREADS,
+                MAXIMUM_THREAD_POOL_SIZE, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), new CallerRunsPolicy());
 
         for (int i = 0; i < INITIAL_THREADS; i++) {
             executor.execute(new PostTask(INITIAL_REQUESTS_PER_THREAD));
         }
 
-        new Thread(() -> scaleThreadPool()).start();
+        Thread scalingThread = new Thread(() -> scaleThreadPool());
+        scalingThread.start();
+
+        // Wait for the scaling thread to finish (it shuts down the executor once all posts complete)
+        scalingThread.join();
+
+        // Wait for the executor to completely shut down
+        executor.awaitTermination(60, TimeUnit.SECONDS);
+
+        long endTime = System.currentTimeMillis();
+        long runTimeMillis = endTime - startTime;
+        double runTimeSeconds = runTimeMillis / 1000.0;
+
+        // Calculate throughput
+        int success = completedRequests.get();
+        int unsuccessful = unsuccessfulRequests.get();
+        double throughput = TOTAL_REQUESTS / runTimeSeconds;
+
+        // Final prints
+        System.out.println("Number of successful requests sent: " + success);
+        System.out.println("Number of unsuccessful requests: " + unsuccessful);
+        System.out.println("Total run time (ms): " + runTimeMillis);
+        System.out.println("Total throughput (requests per second): " + throughput);
 
     }
 
@@ -90,6 +119,8 @@ public class HttpClientTestPost {
                     // If requestQueue is not empty, would not block
                     if (postCheck(reqJson)) {
                         completedRequests.incrementAndGet();
+                    } else {
+                        unsuccessfulRequests.incrementAndGet();
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -102,10 +133,10 @@ public class HttpClientTestPost {
         private boolean postCheck(String reqJson) {
             try {
                 HttpRequest req = HttpRequest.newBuilder()
-                    .POST(HttpRequest.BodyPublishers.ofString(reqJson))
-                    .uri(URI.create(SERVER_URL))
-                    .header("Content-Type", "application/json")
-                    .build();
+                        .POST(HttpRequest.BodyPublishers.ofString(reqJson))
+                        .uri(URI.create(SERVER_URL))
+                        .header("Content-Type", "application/json")
+                        .build();
 
                 HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
 
