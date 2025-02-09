@@ -9,7 +9,7 @@ public class HttpClientTestGet {
 
     private static String url = "http://localhost:8080/multi_threads_war_exploded/hello/12/seasons/2019/day/1/skier/123";
 
-    final static private int NUM_THREADS = 100;
+    static final private int NUM_THREADS = 100;
 
     public static void main(String[] args) throws IOException, InterruptedException {
 

@@ -5,16 +5,27 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import com.google.gson.Gson;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import javax.servlet.http.HttpServletResponse;
 
 
 public class HttpClientTestPost {
 
-    private static String url = "http://localhost:8080/multi_threads_war_exploded/";
+    private static String SERVER_URL = "http://localhost:8080/multi_threads_war_exploded/";
 
-    final static private int NUM_THREADS = 32;
-    final static private int NUM_INITIAL_REQUESTS = 1000;
-    final static private int TOTAL_REQUESTS = 200_000;
+    private static final int INITIAL_THREADS = 32;
+    private static final int INITIAL_REQUESTS_PER_THREAD = 1000;
+    private static final int TOTAL_REQUESTS = 200_000;
+    private static final int MAXIMUM_THREAD_POOL_SIZE = 512;
+    private static final int SCALE_CHECK_INTERVAL_MS = 5000;
 
+    private static LinkedBlockingQueue<String> requestQueue = new LinkedBlockingQueue<>();
+    private static AtomicInteger completedRequests = new AtomicInteger(0);
+    private static ThreadPoolExecutor executor;
 
     private static final HttpClient httpClient = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_2)
@@ -22,44 +33,108 @@ public class HttpClientTestPost {
             .build();
 
     public static void main(String[] args) throws IOException, InterruptedException {
+        // Create a new thread for handling the random skier ride generator
+        new Thread(new SkierRideGenerator()).start();
 
-        Thread[] threads = new Thread[NUM_THREADS];
+        // Customize the thread pool for POST
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(INITIAL_THREADS,
+            MAXIMUM_THREAD_POOL_SIZE, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), new CallerRunsPolicy());
 
-        for (int i = 0; i < NUM_INITIAL_REQUESTS; i++) {
-            // FIXME: At startup, you must create 32 threads that each send 1000 POST requests and terminate. Once any of these have completed you are free to create as few or as many threads as you like until all the 200K POSTS have been sent.
-
-            Runnable thread = () -> {
-                try {
-                    // FIXME: generate random skier lift ride event json is right, but should separate from another single thread
-                    String skierRide = SkierRide.GenerateRandomSkierRide().toString();
-                    Gson gson = new Gson();
-                    String json = gson.toJson(skierRide);
-
-                    // add json header
-                    // TODO: a posting thread never has to wait for an event to be available.
-                    // TODO: it consumes as little CPU and memory as possible, making maximum capacity available for making POST requests
-                    HttpRequest request = HttpRequest.newBuilder()
-                            .POST(HttpRequest.BodyPublishers.ofString(json))
-                            .uri(URI.create(url))
-                            .header("Content-Type", "application/json")
-                            .build();
-
-                    // send post request
-                    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-                    // print response
-                    // TODO: The server will return an HTTP 201 response code for a successful POST operation. As soon as the 201 is received, the client thread should immediately send the next request until it has exhausted the number of requests to send.
-                    System.out.println(response.statusCode());
-                    System.out.println(response.body());
-                } catch (IOException | InterruptedException e) {
-                    System.err.println("Error in thread " + Thread.currentThread().getId() + ": " + e.getMessage());
-                    e.printStackTrace();
-                }
-            };
-
-            threads[i] = new Thread(thread);
-            threads[i].start();
+        for (int i = 0; i < INITIAL_THREADS; i++) {
+            executor.execute(new PostTask(INITIAL_REQUESTS_PER_THREAD));
         }
 
+        new Thread(() -> scaleThreadPool()).start();
+
+    }
+
+
+    static class SkierRideGenerator implements Runnable {
+        @Override
+        public void run() {
+            for (int i = 0; i < TOTAL_REQUESTS; i++) {
+                try {
+                    SkierRide ride = SkierRide.GenerateRandomSkierRide();
+                    Gson gson = new Gson();
+                    String requestJson = gson.toJson(ride);
+
+                    requestQueue.put(requestJson);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            System.out.println("All lift ride generated!");
+        }
+    }
+
+    private static class PostTask implements Runnable {
+        private final int requestNum;
+
+        public PostTask(int requestNum) {
+            this.requestNum = requestNum;
+        }
+
+        @Override
+        public void run() {
+            int sent = 0;
+            while (sent < requestNum) {
+                try {
+                    String reqJson = requestQueue.take();
+                    // If requestQueue is not empty, would not block
+                    if (doPost(reqJson)) {
+                        completedRequests.incrementAndGet();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                sent++;
+            }
+        }
+
+        private boolean doPost(String reqJson) {
+            try {
+                HttpRequest req = HttpRequest.newBuilder()
+                    .POST(HttpRequest.BodyPublishers.ofString(reqJson))
+                    .uri(URI.create(SERVER_URL))
+                    .header("Conten-Type", "application/json")
+                    .build();
+
+                HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+
+                return res.statusCode() == HttpServletResponse.SC_CREATED;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+    }
+
+    private static void scaleThreadPool() {
+        while (completedRequests.get() < TOTAL_REQUESTS) {
+            try {
+                Thread.sleep(SCALE_CHECK_INTERVAL_MS);
+
+                int activeThreads = executor.getActiveCount();
+                int requestQueueSize = requestQueue.size();
+
+                if (requestQueueSize > 10_000 && activeThreads < MAXIMUM_THREAD_POOL_SIZE / 2) {
+                    int targetThreads = Math.min(MAXIMUM_THREAD_POOL_SIZE,
+                        activeThreads + INITIAL_THREADS);
+                    executor.setCorePoolSize(targetThreads);
+                    executor.setMaximumPoolSize(targetThreads);
+                    System.out.println("Increase threads size to: " + targetThreads);
+                } else if (requestQueueSize < 50_000 && activeThreads > INITIAL_THREADS) {
+                    int targetThreads = Math.min(MAXIMUM_THREAD_POOL_SIZE,
+                        activeThreads - INITIAL_THREADS / 2);
+                    executor.setCorePoolSize(targetThreads);
+                    executor.setMaximumPoolSize(targetThreads);
+                    System.out.println("Decrease threads size to: " + targetThreads);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        executor.shutdown();
     }
 }
