@@ -85,7 +85,7 @@ public class HttpClientTestPost {
                 try {
                     String reqJson = requestQueue.take();
                     // If requestQueue is not empty, would not block
-                    if (doPost(reqJson)) {
+                    if (postCheck(reqJson)) {
                         completedRequests.incrementAndGet();
                     }
                 } catch (InterruptedException e) {
@@ -96,7 +96,7 @@ public class HttpClientTestPost {
             }
         }
 
-        private boolean doPost(String reqJson) {
+        private boolean postCheck(String reqJson) {
             try {
                 HttpRequest req = HttpRequest.newBuilder()
                     .POST(HttpRequest.BodyPublishers.ofString(reqJson))
