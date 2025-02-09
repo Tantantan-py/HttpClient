@@ -124,9 +124,9 @@ public class HttpClientTestPost {
                     executor.setCorePoolSize(targetThreads);
                     executor.setMaximumPoolSize(targetThreads);
                     System.out.println("Increase threads size to: " + targetThreads);
-                } else if (requestQueueSize < 50_000 && activeThreads > INITIAL_THREADS) {
+                } else if (requestQueueSize < 5_000 && activeThreads > INITIAL_THREADS) {
                     int targetThreads = Math.min(MAXIMUM_THREAD_POOL_SIZE,
-                        activeThreads - INITIAL_THREADS / 2);
+                        activeThreads - INITIAL_THREADS);
                     executor.setCorePoolSize(targetThreads);
                     executor.setMaximumPoolSize(targetThreads);
                     System.out.println("Decrease threads size to: " + targetThreads);
