@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.servlet.http.HttpServletResponse;
 
 public class SkierRidePost {
-    private static final String SERVER_URL = "http://localhost:8080/multi_threads_war_exploded/";
+    private static final String SERVER_URL = "http://localhost:8080/multi_threads_war_exploded/skiers/12/seasons/2019/day/1/skier/123";
 
     private static final int INITIAL_THREADS = 32;
     private static final int INITIAL_REQUESTS_PER_THREAD = 1000;
@@ -23,10 +23,7 @@ public class SkierRidePost {
     private static AtomicInteger completedRequests = new AtomicInteger(0);
     private static AtomicInteger unsuccessfulRequests = new AtomicInteger(0);
     private static ThreadPoolExecutor executor;
-    private static final HttpClient httpClient = HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_2)
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
+    private static final HttpClient httpClient = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).connectTimeout(Duration.ofSeconds(10)).build();
 
     public static void main(String[] args) throws IOException, InterruptedException {
         long startTime = System.currentTimeMillis();
@@ -57,10 +54,9 @@ public class SkierRidePost {
             completionService.submit(new PostTask(INITIAL_REQUESTS_PER_THREAD), null);
         }
 
-        int submittedTasks = INITIAL_THREADS;
-
         // Continue submitting new tasks until all 200K requests are processed
         while (completedRequests.get() < TOTAL_REQUESTS) {
+            System.out.println("Current completed requests: " + completedRequests.get() + "\n Current threads: " + executor.getActiveCount() + "\n Current queue size: " + executor.getQueue().size() + "\n Current pool size: " + executor.getPoolSize() + "\n Current time in ms: " + (System.currentTimeMillis() - startTime));
             // Wait for a thread to finish, then submit another batch
             completionService.take();  // Blocks until one task is done
 
@@ -72,7 +68,6 @@ public class SkierRidePost {
             // Adjust the batch size if fewer requests remain
             int batchSize = Math.min(INITIAL_REQUESTS_PER_THREAD, remaining);
             completionService.submit(new PostTask(batchSize), null);
-            submittedTasks++;
         }
 
         // Shutdown the executor
@@ -135,17 +130,17 @@ public class SkierRidePost {
 
         private boolean postCheck(String reqJson) {
             try {
-                HttpRequest req = HttpRequest.newBuilder()
-                        .POST(HttpRequest.BodyPublishers.ofString(reqJson))
-                        .uri(URI.create(SERVER_URL))
-                        .header("Content-Type", "application/json")
-                        .build();
+                HttpRequest req = HttpRequest.newBuilder().POST(HttpRequest.BodyPublishers.ofString(reqJson)).uri(URI.create(SERVER_URL)).header("Content-Type", "application/json").build();
 
                 HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-                return res.statusCode() == HttpServletResponse.SC_CREATED || res.statusCode() == HttpServletResponse.SC_OK;
+                return res.statusCode() == HttpServletResponse.SC_CREATED;
             } catch (Exception e) {
                 return false;
             }
         }
     }
 }
+
+/*
+2070 ms single latency
+ */
