@@ -12,7 +12,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.servlet.http.HttpServletResponse;
 
 public class SkierRidePost {
+//    private static final String SERVER_URL = "http://52.88.90.36:8080/multi-threads_war/skiers/12/seasons/2019/day/1/skier/123";
     private static final String SERVER_URL = "http://localhost:8080/multi_threads_war_exploded/skiers/12/seasons/2019/day/1/skier/123";
+
 
     private static final int INITIAL_THREADS = 32;
     private static final int INITIAL_REQUESTS_PER_THREAD = 1000;
@@ -56,7 +58,7 @@ public class SkierRidePost {
 
         // Continue submitting new tasks until all 200K requests are processed
         while (completedRequests.get() < TOTAL_REQUESTS) {
-            System.out.println("Current completed requests: " + completedRequests.get() + "\n Current threads: " + executor.getActiveCount() + "\n Current queue size: " + executor.getQueue().size() + "\n Current pool size: " + executor.getPoolSize() + "\n Current time in ms: " + (System.currentTimeMillis() - startTime));
+            System.out.println("Current completed requests: " + completedRequests.get() + "\n Active threads: " + executor.getActiveCount() + "\n Queue size: " + executor.getQueue().size() + "\n Pool size: " + executor.getPoolSize() + "\n Maximum pool size set at: " + executor.getMaximumPoolSize() +"\n Consumed time in ms: " + (System.currentTimeMillis() - startTime));
             // Wait for a thread to finish, then submit another batch
             completionService.take();  // Blocks until one task is done
 
@@ -120,11 +122,11 @@ public class SkierRidePost {
                     } else {
                         unsuccessfulRequests.incrementAndGet();
                     }
+                    sent++;
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
                 }
-                sent++;
             }
         }
 
@@ -142,5 +144,11 @@ public class SkierRidePost {
 }
 
 /*
-2070 ms single latency
+1 single request:
+2000 ms single latency
+
+1 thread to handle 10_000 requests:
+Total time takes: 1800 ms
+
+through put estimated:
  */
