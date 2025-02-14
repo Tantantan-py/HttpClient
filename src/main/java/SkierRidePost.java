@@ -17,8 +17,8 @@ public class SkierRidePost {
 
 
     private static final int INITIAL_THREADS = 32;
-    private static final int INITIAL_REQUESTS_PER_THREAD = 1000;
-    private static final int TOTAL_REQUESTS = 200_000;
+    private static final int INITIAL_REQUESTS_PER_THREAD = 1_000;
+    private static final int TOTAL_REQUESTS = 10_000;
     private static final int MAXIMUM_THREAD_POOL_SIZE = 512;
 
     private static LinkedBlockingQueue<String> requestQueue = new LinkedBlockingQueue<>();
@@ -114,7 +114,7 @@ public class SkierRidePost {
             int sent = 0;
             while (sent < requestNum) {
                 try {
-                    String reqJson = requestQueue.poll(2, TimeUnit.SECONDS);
+                    String reqJson = requestQueue.poll(1, TimeUnit.SECONDS);
                     if (reqJson == null) break; // Exit loop if queue is empty
 
                     if (postCheck(reqJson)) {
@@ -144,11 +144,22 @@ public class SkierRidePost {
 }
 
 /*
-1 single request:
-2000 ms single latency
+1 thread, 1 initial request per thread configured to handle 1 single request:
+70 ms latency
 
-1 thread to handle 10_000 requests:
-Total time takes: 1800 ms
+1 thread to handle 1_000 requests with 1_000 initial requests per thread:
+Total time takes about: 500 ms
+through put estimated: 2_000 requests per second
 
-through put estimated:
+32 threads to handle 10_000 requests with 1_000 initial requests per thread:
+total time takes about: 2_000 ms
+through put estimated: 5_000 requests per second
+
+32 threads to handle 32_000 requests with 1_000 initial requests per thread:
+total time takes about: 3_000 ms
+through put estimated: 10_000 requests per second
+
+32 threads to handle 200_000 requests with 1_000 initial requests per thread:
+total time takes about: 10_000 ms
+through put estimated: 20_000 requests per second
  */

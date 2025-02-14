@@ -14,13 +14,13 @@ import javax.servlet.http.HttpServletResponse;
 
 
 public class HttpClientTestPost {
-    private static String SERVER_URL = "http://localhost:8080/multi_threads_war_exploded/";
+    private static String SERVER_URL = "http://localhost:8080/multi_threads_war_exploded/skiers/12/seasons/2019/day/1/skier/123";
 
     private static final int INITIAL_THREADS = 32;
     private static final int INITIAL_REQUESTS_PER_THREAD = 1000;
     private static final int TOTAL_REQUESTS = 200_000;
     private static final int MAXIMUM_THREAD_POOL_SIZE = 512;
-    private static final int SCALE_CHECK_INTERVAL_MS = 5000;
+    private static final int SCALE_CHECK_INTERVAL_MS = 1000;
 
     private static final int INCREASE_QUEUE_THRESHOLD = 10_000;
     private static final int DECREASE_QUEUE_THRESHOLD = 5_000;
@@ -44,18 +44,7 @@ public class HttpClientTestPost {
         Thread generatorThread = new Thread(new SkierRideGenerator());
         generatorThread.start();
 
-        // For debugging:
-        // Create a scheduler to run a task every minute
-        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-        final AtomicInteger lastCount = new AtomicInteger(0);
-
-        scheduler.scheduleAtFixedRate(() -> {
-            int currentCount = completedRequests.get();
-            int requestsLastMinute = currentCount - lastCount.getAndSet(currentCount);
-            System.out.println("Requests handled in the last minute: " + requestsLastMinute);
-        }, 1, 1, TimeUnit.MINUTES);
-
-        // Customize the thread pool for POST
+        // The threads should take the requests from the requestQueue
         executor = new ThreadPoolExecutor(INITIAL_THREADS,
                 MAXIMUM_THREAD_POOL_SIZE, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), new CallerRunsPolicy());
 
@@ -63,14 +52,16 @@ public class HttpClientTestPost {
             executor.execute(new PostTask(INITIAL_REQUESTS_PER_THREAD));
         }
 
-        Thread scalingThread = new Thread(() -> scaleThreadPool());
-        scalingThread.start();
+        // TODO: Scale the thread pool based on the queue size
+        // TODO: Once any of the initial 32 threads have completed then are free to create as few or as many threads as it like until all the 200K POSTS have been sent.
+        Thread scaleThread = new Thread(HttpClientTestPost::scaleThreadPool);
+        scaleThread.start();
 
-        // Wait for the scaling thread to finish (it shuts down the executor once all posts complete)
-        scalingThread.join();
-
-        // Wait for the executor to completely shut down
-        executor.awaitTermination(60, TimeUnit.SECONDS);
+        // Wait for all tasks to complete
+        executor.shutdown();
+        if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
+            executor.shutdownNow();
+        }
 
         long endTime = System.currentTimeMillis();
         long runTimeMillis = endTime - startTime;
@@ -152,7 +143,7 @@ public class HttpClientTestPost {
                 // For debugging
                 // System.out.println("Status code: " + res.statusCode());
 
-                return res.statusCode() == HttpServletResponse.SC_CREATED || res.statusCode() == HttpServletResponse.SC_OK;
+                return res.statusCode() == HttpServletResponse.SC_CREATED;
             } catch (Exception e) {
                 return false;
             }
@@ -166,36 +157,22 @@ public class HttpClientTestPost {
 
                 int activeThreads = executor.getActiveCount();
                 int requestQueueSize = requestQueue.size();
-
                 double queueToThreadRatio = (activeThreads == 0) ? 0 : (double) requestQueueSize / activeThreads;
 
-                // Scale up if the queue size exceeds threshold and based on thread-to-queue ratio
+                int targetThreads = activeThreads;
+
+                // Scale up: If the queue is large or thread-to-queue ratio is too high
                 if (requestQueueSize > INCREASE_QUEUE_THRESHOLD || queueToThreadRatio > QUEUE_TO_THREAD_RATIO_THRESHOLD) {
-                    int targetThreads;
-
-                    if (activeThreads <= INITIAL_THREADS) {
-                        targetThreads = 128; // Scale from 32 → 128
+                    if (activeThreads <= 32) {
+                        targetThreads = 128;
                     } else if (activeThreads <= 128) {
-                        targetThreads = 256; // Scale from 128 → 256
+                        targetThreads = 256;
                     } else {
-                        targetThreads = MAXIMUM_THREAD_POOL_SIZE; // Final scale from 256 → 512
+                        targetThreads = MAXIMUM_THREAD_POOL_SIZE;
                     }
-
-                    executor.setCorePoolSize(targetThreads);
-                    executor.setMaximumPoolSize(targetThreads);
-
-                    int currentPoolSize = executor.getCorePoolSize();
-                    if (targetThreads != currentPoolSize) {
-                        executor.setCorePoolSize(targetThreads);
-                        executor.setMaximumPoolSize(targetThreads);
-                        System.out.println("Thread pool size changed to: " + targetThreads);
-                    }
-
                 }
-                // Scale down
+                // Scale down: If queue is small and ratio is low
                 else if (requestQueueSize < DECREASE_QUEUE_THRESHOLD && queueToThreadRatio < QUEUE_TO_THREAD_RATIO_THRESHOLD) {
-                    int targetThreads;
-
                     if (activeThreads >= 512) {
                         targetThreads = 256;
                     } else if (activeThreads >= 256) {
@@ -203,16 +180,18 @@ public class HttpClientTestPost {
                     } else {
                         targetThreads = INITIAL_THREADS;
                     }
+                }
 
-                    executor.setCorePoolSize(targetThreads);
-                    executor.setMaximumPoolSize(targetThreads);
+                // Apply new thread limits
+                executor.setCorePoolSize(targetThreads);
+                executor.setMaximumPoolSize(targetThreads);
+                System.out.println("Adjusted thread pool size to: " + targetThreads);
 
-                    int currentPoolSize = executor.getCorePoolSize();
-                    if (targetThreads != currentPoolSize) {
-                        executor.setCorePoolSize(targetThreads);
-                        executor.setMaximumPoolSize(targetThreads);
-                        System.out.println("Thread pool size changed to: " + targetThreads);
-                    }
+                // **Ensure threads are actively handling requests**:
+                int currentRunningThreads = executor.getActiveCount();
+                while (currentRunningThreads < targetThreads && completedRequests.get() + unsuccessfulRequests.get() < TOTAL_REQUESTS) {
+                    executor.execute(new PostTask(INITIAL_REQUESTS_PER_THREAD));
+                    currentRunningThreads++;
                 }
 
             } catch (InterruptedException e) {
