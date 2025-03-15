@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.servlet.http.HttpServletResponse;
 
 public class SkierRidePost {
-    private static final String SERVER_URL = "http://34.221.190.17:8080/multi-threads_war/skiers/12/seasons/2019/day/1/skier/123";
+    private static final String BASE_SERVER_URL = "http://52.27.246.123:8080/multi-threads_war/skiers/12/seasons/2019/day/1/skier/";
 //    private static final String SERVER_URL = "http://localhost:8080/multi_threads_war_exploded/skiers/12/seasons/2019/day/1/skier/123";
 
 
@@ -52,7 +52,7 @@ public class SkierRidePost {
          */
 
         // Initialize thread pool
-        executor = new ThreadPoolExecutor(INITIAL_THREADS, MAXIMUM_THREAD_POOL_SIZE, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
+        executor = new ThreadPoolExecutor(INITIAL_THREADS, MAXIMUM_THREAD_POOL_SIZE, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(5000));
         ExecutorCompletionService<Void> completionService = new ExecutorCompletionService<>(executor);
 
         // Submit first 32 tasks
@@ -153,11 +153,16 @@ public class SkierRidePost {
             }
         }
 
+        public static String getRandomServerURL() {
+            int randomSkierID = ThreadLocalRandom.current().nextInt(1, 100000); // Generate SkierID from 1 to 100000
+            return BASE_SERVER_URL + randomSkierID;
+        }
+
         private int postCheck(String reqJson) {
             try {
                 HttpRequest req = HttpRequest.newBuilder()
                         .POST(HttpRequest.BodyPublishers.ofString(reqJson))
-                        .uri(URI.create(SERVER_URL))
+                        .uri(URI.create(getRandomServerURL()))  // Random SkierID per request
                         .header("Content-Type", "application/json")
                         .build();
 
